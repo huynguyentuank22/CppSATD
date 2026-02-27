@@ -108,7 +108,7 @@ CONFIG: Dict[str, Any] = {
     # ── Models ───────────────────────────────────────────────────────────────
     "COMMENT_ENCODERS": [
         "roberta-base",
-        "microsoft/deberta-v3-base",
+        "microsoft/deberta-base",
         "bert-base-uncased",
     ],
     "CODE_ENCODERS": [
@@ -121,6 +121,29 @@ CONFIG: Dict[str, Any] = {
     "TOP_K_FUSION_FOR_CROSSATTN": 3,    # how many late-fusion combos to promote to cross-attn
     "CROSS_ATTN_HEADS": 8,
     "CROSS_ATTN_PROJ_DIM": 768,
+
+    # ── Phase control ──────────────────────────────────────────────────────────
+    # Which phase to run.  0 = all phases sequentially (original behaviour).
+    # 1 = comment-only baselines
+    # 2 = code-only baselines
+    # 3 = late-fusion dual encoder
+    # 4 = cross-attention dual encoder  (reads results_phase3.json)
+    # Overridden by  --phase N  CLI argument when calling: python run_grid.py --phase N
+    "PHASE": 0,
+
+    # ── Phase result paths (optional) ──────────────────────────────────────────
+    # Only Phase 4 needs results from a previous phase:
+    #   it reads Phase 3's results_phase3.json to select the top-K late-fusion
+    #   combos before running cross-attention training.
+    # Phases 1, 2, 3 are fully independent and need no prior results.
+    #
+    # If Phase 3 was run in a different Kaggle session, point PHASE3_RESULT_PATH
+    # to the saved results_phase3.json (e.g. from a Kaggle Dataset input).
+    # Leave as None to look for it automatically inside OUTPUT_DIR.
+    #
+    # Example (Kaggle):
+    #   "/kaggle/input/satd-phase3-outputs/results_phase3.json"
+    "PHASE3_RESULT_PATH": None,
 
     # ── Debug ────────────────────────────────────────────────────────────────
     # Set > 0 to subsample dataset for a quick smoke-test run;
@@ -589,14 +612,191 @@ def run_single(
 
 
 # ===========================================================================
+# Phase result helpers
+# ===========================================================================
+
+def _save_phase_results(results: List[Dict], phase: int, output_dir: Path) -> None:
+    """
+    Persist results from a single phase.
+    Saves:
+      results_phase<N>.json  — full metrics (no state_dicts)
+      results_phase<N>.csv   — flat summary table
+    """
+    # JSON (drop state_dicts — too large)
+    json_results = [{k: v for k, v in r.items() if k != "state_dict"} for r in results]
+    json_path = output_dir / f"results_phase{phase}.json"
+    with open(json_path, "w") as f:
+        json.dump(json_results, f, indent=2)
+    logger.info("Phase %d → saved %s", phase, json_path)
+
+    # CSV
+    rows_csv = []
+    for r in results:
+        row: Dict[str, Any] = {
+            "model_type":        r["model_type"],
+            "comment_encoder":   r.get("comment_encoder", ""),
+            "code_encoder":      r.get("code_encoder", ""),
+            "lr":                r["lr"],
+            "best_val_macro_f1": r["best_val_macro_f1"],
+            "test_macro_f1":     r["test_macro_f1"],
+            "best_epoch":        r.get("best_epoch"),
+        }
+        rows_csv.append(row)
+    csv_path = output_dir / f"results_phase{phase}.csv"
+    pd.DataFrame(rows_csv).to_csv(csv_path, index=False)
+    logger.info("Phase %d → saved %s", phase, csv_path)
+
+
+def _load_phase_results(phase: int, output_dir: Path) -> List[Dict]:
+    """Load a previously saved phase result JSON (no state_dicts).
+
+    For phase 3 specifically, resolution order is:
+      1. CONFIG["PHASE3_RESULT_PATH"]       — explicit override path
+      2. output_dir / results_phase3.json   — default location
+    All other phases use only the default location.
+    """
+    # Explicit override only supported for phase 3
+    if phase == 3:
+        override = CONFIG.get("PHASE3_RESULT_PATH")
+        if override:
+            path = Path(override)
+            if not path.exists():
+                raise FileNotFoundError(
+                    f"PHASE3_RESULT_PATH points to a non-existent file: {path}"
+                )
+            with open(path) as f:
+                data = json.load(f)
+            logger.info("Loaded phase %d results (%d runs) from %s", phase, len(data), path)
+            return data
+
+    # Default location
+    path = output_dir / f"results_phase{phase}.json"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Phase {phase} results not found at {path}.\n"
+            f"Either run  python run_grid.py --phase {phase}  first"
+            + (", or set CONFIG['PHASE3_RESULT_PATH'] to the correct path." if phase == 3 else ".")
+        )
+    with open(path) as f:
+        data = json.load(f)
+    logger.info("Loaded phase %d results (%d runs) from %s", phase, len(data), path)
+    return data
+
+
+def _save_grid_summary(all_results: List[Dict], output_dir: Path) -> None:
+    """Save the combined results_grid.csv / results_grid.json and best_model/."""
+    rows_csv = []
+    for r in all_results:
+        row: Dict[str, Any] = {
+            "model_type":        r["model_type"],
+            "comment_encoder":   r.get("comment_encoder", ""),
+            "code_encoder":      r.get("code_encoder", ""),
+            "lr":                r["lr"],
+            "best_val_macro_f1": r["best_val_macro_f1"],
+            "test_macro_f1":     r["test_macro_f1"],
+            "best_epoch":        r.get("best_epoch"),
+        }
+        rows_csv.append(row)
+    results_df = pd.DataFrame(rows_csv)
+    results_df.to_csv(output_dir / "results_grid.csv", index=False)
+    logger.info("Saved results_grid.csv")
+
+    json_results = [{k: v for k, v in r.items() if k != "state_dict"} for r in all_results]
+    with open(output_dir / "results_grid.json", "w") as f:
+        json.dump(json_results, f, indent=2)
+    logger.info("Saved results_grid.json")
+
+    # Best model by val macro f1
+    best_result = max(all_results, key=lambda r: r["best_val_macro_f1"])
+    logger.info(
+        "\n*** BEST RUN ***\n  type=%s  comment=%s  code=%s  lr=%.0e  val_f1=%.4f  test_f1=%.4f",
+        best_result["model_type"],
+        best_result.get("comment_encoder", "-"),
+        best_result.get("code_encoder", "-"),
+        best_result["lr"],
+        best_result["best_val_macro_f1"],
+        best_result["test_macro_f1"],
+    )
+
+    # Only save checkpoint if state_dict is present (not available when loaded from JSON)
+    best_dir = output_dir / "best_model"
+    best_dir.mkdir(parents=True, exist_ok=True)
+
+    if best_result.get("state_dict") is not None:
+        torch.save(best_result["state_dict"], best_dir / "model.pt")
+        logger.info("Saved best checkpoint to %s", best_dir / "model.pt")
+    else:
+        logger.warning(
+            "state_dict not available (loaded from JSON). "
+            "Rerun the winning phase to get model.pt."
+        )
+
+    best_config = {
+        "model_type":        best_result["model_type"],
+        "comment_encoder":   best_result.get("comment_encoder", ""),
+        "code_encoder":      best_result.get("code_encoder", ""),
+        "lr":                best_result["lr"],
+        "max_len_comment":   CONFIG["MAX_LEN_COMMENT"],
+        "max_len_code":      CONFIG["MAX_LEN_CODE"],
+        "num_labels":        NUM_LABELS,
+        "label2id":          LABEL2ID,
+        "id2label":          {str(k): v for k, v in ID2LABEL.items()},
+        "labels":            CONFIG["LABELS"],
+        "best_val_macro_f1": best_result["best_val_macro_f1"],
+        "test_macro_f1":     best_result["test_macro_f1"],
+        "best_epoch":        best_result.get("best_epoch"),
+        "val_metrics":       best_result.get("val_metrics"),
+        "test_metrics":      best_result.get("test_metrics"),
+        "split_info_path":   str(output_dir / "split_info.json"),
+        "seed":              CONFIG["SEED"],
+        "cross_attn_heads":    CONFIG["CROSS_ATTN_HEADS"],
+        "cross_attn_proj_dim": CONFIG["CROSS_ATTN_PROJ_DIM"],
+        "pooling":             "mean",
+        "dropout":             0.1,
+    }
+    with open(best_dir / "best_config.json", "w") as f:
+        json.dump(best_config, f, indent=2)
+    logger.info("Saved best_config.json to %s", best_dir / "best_config.json")
+
+
+# ===========================================================================
 # Main grid-search driver
 # ===========================================================================
 
 def main() -> None:
+    import argparse
+    ap = argparse.ArgumentParser(
+        description="Grid-search pipeline for SATD detection."
+    )
+    ap.add_argument(
+        "--phase",
+        type=int,
+        default=CONFIG.get("PHASE", 0),
+        choices=[0, 1, 2, 3, 4],
+        help=(
+            "Phase to run (default: %(default)s).\n"
+            "  0 = all phases sequentially\n"
+            "  1 = comment-only baselines       (~3.5h on Kaggle P100)\n"
+            "  2 = code-only baselines          (~3.5h on Kaggle P100)\n"
+            "  3 = late-fusion dual encoder     (~9h  on Kaggle P100)\n"
+            "  4 = cross-attention dual encoder (~3h  on Kaggle P100)\n"
+            "          Phase 4 requires results_phase3.json to exist first."
+        ),
+    )
+    args, _unknown = ap.parse_known_args()  # _unknown ignores Jupyter/papermill extras
+    phase = args.phase
+
+    logger.info("=" * 70)
+    logger.info("run_grid  PHASE=%d%s", phase, "  (all)" if phase == 0 else "")
+    logger.info("=" * 70)
+
     set_seed(CONFIG["SEED"])
     device = torch.device(CONFIG["DEVICE"])
     output_dir = Path(CONFIG["OUTPUT_DIR"])
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── Phase 4 only: load phase 3 results, skip data setup if desired ─────
+    # (we still need data for training, so setup always runs)
 
     # ── 1. Load & normalise data ────────────────────────────────────────────
     df_raw = load_dataframe(CONFIG["DATA_PATH"])
@@ -615,7 +815,7 @@ def main() -> None:
         seed=CONFIG["SEED"],
     )
 
-    # Save split indices for XAI reproducibility
+    # Save split indices for XAI reproducibility (idempotent overwrite)
     split_info: Dict[str, Any] = {
         "train_comment_ids": train_df["comment_id"].tolist(),
         "val_comment_ids":   val_df["comment_id"].tolist(),
@@ -660,155 +860,144 @@ def main() -> None:
         )
         return run_single(run_cfg, tr_l, va_l, te_l, class_weights, device, output_dir)
 
-    # ── 5a. Baseline: comment-only ──────────────────────────────────────────
-    logger.info("=" * 70)
-    logger.info("PHASE 1: Comment-only baselines")
-    logger.info("=" * 70)
-    for c_enc in comment_encoders:
-        for lr in lr_grid:
-            run_cfg = {"model_type": "comment", "comment_encoder": c_enc, "lr": lr}
-            res = _run_combo(run_cfg, c_tok_name=c_enc, k_tok_name=c_enc)
-            all_results.append(res)
+    # =========================================================================
+    # PHASE 1 — Comment-only baselines
+    # =========================================================================
+    if phase in (0, 1):
+        logger.info("=" * 70)
+        logger.info("PHASE 1: Comment-only baselines")
+        logger.info("=" * 70)
+        phase1_results: List[Dict] = []
+        for c_enc in comment_encoders:
+            for lr in lr_grid:
+                run_cfg = {"model_type": "comment", "comment_encoder": c_enc, "lr": lr}
+                res = _run_combo(run_cfg, c_tok_name=c_enc, k_tok_name=c_enc)
+                phase1_results.append(res)
+                all_results.append(res)
+        _save_phase_results(phase1_results, 1, output_dir)
+        if phase == 1:
+            logger.info("Phase 1 complete. Outputs at: %s", output_dir)
+            return
 
-    # ── 5b. Baseline: code-only ─────────────────────────────────────────────
-    logger.info("=" * 70)
-    logger.info("PHASE 2: Code-only baselines")
-    logger.info("=" * 70)
-    for k_enc in code_encoders:
-        for lr in lr_grid:
-            run_cfg = {"model_type": "code", "code_encoder": k_enc, "lr": lr}
-            res = _run_combo(run_cfg, c_tok_name=k_enc, k_tok_name=k_enc)
-            all_results.append(res)
-
-    # ── 5c. Late fusion: 9 combos × 3 lrs ──────────────────────────────────
-    logger.info("=" * 70)
-    logger.info("PHASE 3: Late-fusion dual encoder")
-    logger.info("=" * 70)
-    for c_enc in comment_encoders:
+    # =========================================================================
+    # PHASE 2 — Code-only baselines
+    # =========================================================================
+    if phase in (0, 2):
+        logger.info("=" * 70)
+        logger.info("PHASE 2: Code-only baselines")
+        logger.info("=" * 70)
+        phase2_results: List[Dict] = []
         for k_enc in code_encoders:
             for lr in lr_grid:
+                run_cfg = {"model_type": "code", "code_encoder": k_enc, "lr": lr}
+                res = _run_combo(run_cfg, c_tok_name=k_enc, k_tok_name=k_enc)
+                phase2_results.append(res)
+                all_results.append(res)
+        _save_phase_results(phase2_results, 2, output_dir)
+        if phase == 2:
+            logger.info("Phase 2 complete. Outputs at: %s", output_dir)
+            return
+
+    # =========================================================================
+    # PHASE 3 — Late-fusion dual encoder  (9 combos × 3 LRs)
+    # =========================================================================
+    if phase in (0, 3):
+        logger.info("=" * 70)
+        logger.info("PHASE 3: Late-fusion dual encoder")
+        logger.info("=" * 70)
+        phase3_results: List[Dict] = []
+        for c_enc in comment_encoders:
+            for k_enc in code_encoders:
+                for lr in lr_grid:
+                    run_cfg = {
+                        "model_type":      "late_fusion",
+                        "comment_encoder": c_enc,
+                        "code_encoder":    k_enc,
+                        "lr":              lr,
+                    }
+                    res = _run_combo(run_cfg, c_tok_name=c_enc, k_tok_name=k_enc)
+                    phase3_results.append(res)
+                    all_results.append(res)
+        _save_phase_results(phase3_results, 3, output_dir)
+        if phase == 3:
+            logger.info("Phase 3 complete. Outputs at: %s", output_dir)
+            return
+
+    # =========================================================================
+    # PHASE 4 — Cross-attention dual encoder  (top-K combos × 3 LRs)
+    # =========================================================================
+    if phase in (0, 4):
+        logger.info("=" * 70)
+        logger.info("PHASE 4: Cross-attention dual encoder")
+        logger.info("=" * 70)
+
+        # When running phase 4 standalone, read phase 3 results from disk
+        if phase == 4:
+            lf_results = _load_phase_results(3, output_dir)
+        else:
+            lf_results = [r for r in all_results if r["model_type"] == "late_fusion"]
+
+        # Select top-K combos by best val_f1 across all LRs
+        combo_best: Dict[Tuple[str, str], float] = {}
+        for r in lf_results:
+            key = (r["comment_encoder"], r["code_encoder"])
+            if r["best_val_macro_f1"] > combo_best.get(key, -1.0):
+                combo_best[key] = r["best_val_macro_f1"]
+
+        top_k = CONFIG["TOP_K_FUSION_FOR_CROSSATTN"]
+        top_combos = sorted(combo_best.items(), key=lambda x: x[1], reverse=True)[:top_k]
+        logger.info("Top-%d late-fusion combos selected for cross-attn:", top_k)
+        for (c, k), f1 in top_combos:
+            logger.info("  comment=%-35s  code=%-40s  val_f1=%.4f", c, k, f1)
+
+        phase4_results: List[Dict] = []
+        for (c_enc, k_enc), _ in top_combos:
+            for lr in lr_grid:
                 run_cfg = {
-                    "model_type":      "late_fusion",
+                    "model_type":      "cross_attn",
                     "comment_encoder": c_enc,
                     "code_encoder":    k_enc,
                     "lr":              lr,
                 }
                 res = _run_combo(run_cfg, c_tok_name=c_enc, k_tok_name=k_enc)
+                phase4_results.append(res)
                 all_results.append(res)
+        _save_phase_results(phase4_results, 4, output_dir)
 
-    # ── 5d. Select top-k late fusion combos for cross-attn ─────────────────
-    lf_results = [r for r in all_results if r["model_type"] == "late_fusion"]
+        # After phase 4: aggregate ALL phases into results_grid.*
+        if phase == 4:
+            logger.info("Phase 4 complete — aggregating all phases into results_grid.*")
+            all_results = []
+            for p in (1, 2, 3, 4):
+                try:
+                    all_results.extend(_load_phase_results(p, output_dir))
+                except FileNotFoundError as e:
+                    logger.warning("Skipping missing phase: %s", e)
+            all_results.extend(phase4_results)  # use in-memory copy (has state_dict)
+            # de-duplicate: prefer in-memory entry (has state_dict) over JSON entry
+            seen: set = set()
+            deduped: List[Dict] = []
+            for r in reversed(all_results):
+                key = (
+                    r["model_type"],
+                    r.get("comment_encoder", ""),
+                    r.get("code_encoder", ""),
+                    r["lr"],
+                )
+                if key not in seen:
+                    seen.add(key)
+                    deduped.append(r)
+            all_results = list(reversed(deduped))
 
-    # best val_f1 per (comment_encoder, code_encoder) combo
-    combo_best: Dict[Tuple[str, str], float] = {}
-    for r in lf_results:
-        key = (r["comment_encoder"], r["code_encoder"])
-        if r["best_val_macro_f1"] > combo_best.get(key, -1.0):
-            combo_best[key] = r["best_val_macro_f1"]
+        _save_grid_summary(all_results, output_dir)
+        logger.info("Done. Outputs at: %s", output_dir)
+        return
 
-    top_k = CONFIG["TOP_K_FUSION_FOR_CROSSATTN"]
-    top_combos = sorted(combo_best.items(), key=lambda x: x[1], reverse=True)[:top_k]
-    logger.info("Top-%d late-fusion combos for cross-attn:", top_k)
-    for (c, k), f1 in top_combos:
-        logger.info("  comment=%-35s  code=%-40s  val_f1=%.4f", c, k, f1)
-
-    # ── 5e. Cross-attention: top_k combos × 3 lrs ──────────────────────────
+    # phase == 0: all phases ran above, save combined summary
     logger.info("=" * 70)
-    logger.info("PHASE 4: Cross-attention dual encoder")
+    logger.info("All phases complete — saving combined results_grid.*")
     logger.info("=" * 70)
-    for (c_enc, k_enc), _ in top_combos:
-        for lr in lr_grid:
-            run_cfg = {
-                "model_type":      "cross_attn",
-                "comment_encoder": c_enc,
-                "code_encoder":    k_enc,
-                "lr":              lr,
-            }
-            res = _run_combo(run_cfg, c_tok_name=c_enc, k_tok_name=k_enc)
-            all_results.append(res)
-
-    # ── 6. Collect results & save ───────────────────────────────────────────
-    logger.info("=" * 70)
-    logger.info("Saving results …")
-    logger.info("=" * 70)
-
-    rows_csv = []
-    for r in all_results:
-        row: Dict[str, Any] = {
-            "model_type":        r["model_type"],
-            "comment_encoder":   r.get("comment_encoder", ""),
-            "code_encoder":      r.get("code_encoder", ""),
-            "lr":                r["lr"],
-            "best_val_macro_f1": r["best_val_macro_f1"],
-            "test_macro_f1":     r["test_macro_f1"],
-            "best_epoch":        r["best_epoch"],
-        }
-        # per-class val f1
-        if r.get("val_metrics") and r["val_metrics"].get("per_class_f1"):
-            for lbl, f1 in r["val_metrics"]["per_class_f1"].items():
-                row[f"val_f1_{lbl}"] = f1
-        rows_csv.append(row)
-
-    results_df = pd.DataFrame(rows_csv)
-    results_df.to_csv(output_dir / "results_grid.csv", index=False)
-    logger.info("Saved results_grid.csv")
-
-    # Save full JSON (without state_dicts — too large)
-    json_results = []
-    for r in all_results:
-        jr = {k: v for k, v in r.items() if k != "state_dict"}
-        json_results.append(jr)
-    with open(output_dir / "results_grid.json", "w") as f:
-        json.dump(json_results, f, indent=2)
-    logger.info("Saved results_grid.json")
-
-    # ── 7. Best model ───────────────────────────────────────────────────────
-    best_result = max(all_results, key=lambda r: r["best_val_macro_f1"])
-    logger.info(
-        "\n*** BEST RUN ***\n  type=%s  comment=%s  code=%s  lr=%.0e  val_f1=%.4f  test_f1=%.4f",
-        best_result["model_type"],
-        best_result.get("comment_encoder", "-"),
-        best_result.get("code_encoder", "-"),
-        best_result["lr"],
-        best_result["best_val_macro_f1"],
-        best_result["test_macro_f1"],
-    )
-
-    best_dir = output_dir / "best_model"
-    best_dir.mkdir(parents=True, exist_ok=True)
-
-    torch.save(best_result["state_dict"], best_dir / "model.pt")
-    logger.info("Saved best checkpoint to %s", best_dir / "model.pt")
-
-    best_config = {
-        "model_type":        best_result["model_type"],
-        "comment_encoder":   best_result.get("comment_encoder", ""),
-        "code_encoder":      best_result.get("code_encoder", ""),
-        "lr":                best_result["lr"],
-        "max_len_comment":   CONFIG["MAX_LEN_COMMENT"],
-        "max_len_code":      CONFIG["MAX_LEN_CODE"],
-        "num_labels":        NUM_LABELS,
-        "label2id":          LABEL2ID,
-        "id2label":          {str(k): v for k, v in ID2LABEL.items()},
-        "labels":            CONFIG["LABELS"],
-        "best_val_macro_f1": best_result["best_val_macro_f1"],
-        "test_macro_f1":     best_result["test_macro_f1"],
-        "best_epoch":        best_result["best_epoch"],
-        "val_metrics":       best_result["val_metrics"],
-        "test_metrics":      best_result["test_metrics"],
-        "split_info_path":   str(output_dir / "split_info.json"),
-        "seed":              CONFIG["SEED"],
-        # Cross-attn specifics (only relevant if model_type == cross_attn)
-        "cross_attn_heads":    CONFIG["CROSS_ATTN_HEADS"],
-        "cross_attn_proj_dim": CONFIG["CROSS_ATTN_PROJ_DIM"],
-        "pooling":             "mean",
-        "dropout":             0.1,
-    }
-
-    with open(best_dir / "best_config.json", "w") as f:
-        json.dump(best_config, f, indent=2)
-    logger.info("Saved best_config.json to %s", best_dir / "best_config.json")
-
+    _save_grid_summary(all_results, output_dir)
     logger.info("Done. Outputs at: %s", output_dir)
 
 
