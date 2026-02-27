@@ -87,15 +87,21 @@ CONFIG: Dict[str, Any] = {
 
     # ── Training ─────────────────────────────────────────────────────────────
     "EPOCHS": 3,
-    "BATCH_SIZE": 8,
+    # P100 16 GB: batch_size=16 halves the number of steps → ~45% faster than batch=8
+    # If you get OOM on late-fusion/cross-attn, drop back to 8.
+    "BATCH_SIZE": 16,
     "WARMUP_RATIO": 0.06,
     "WEIGHT_DECAY": 0.01,
     "ES_PATIENCE": 2,
     "MAX_GRAD_NORM": 1.0,
+    # P100 supports FP16 but lacks Turing Tensor Cores → AMP gives only ~1.3× speedup.
+    # Still worth enabling for memory savings (allows larger batch).
     "USE_AMP": torch.cuda.is_available(),
     "DEVICE": "cuda" if torch.cuda.is_available() else "cpu",
 
     # ── LR grid ──────────────────────────────────────────────────────────────
+    # Full grid = 3 LRs.  To fit in a ~9h Kaggle session use [2e-5] only,
+    # then re-run with [1e-5, 5e-5] if you have time.
     "LR_GRID": [1e-5, 2e-5, 5e-5],
 
     # ── Models ───────────────────────────────────────────────────────────────
@@ -121,6 +127,16 @@ CONFIG: Dict[str, Any] = {
     "DEBUG_SUBSAMPLE": 0,
     # Set to True to only run a tiny grid (1 encoder each, 1 lr) — fast CI check
     "DEBUG_TINY_GRID": False,
+
+    # ── P100 time-budget presets (uncomment the one you need) ─────────────────
+    # PRESET A — smoke test (~20 min):
+    #   "DEBUG_SUBSAMPLE": 2000, "DEBUG_TINY_GRID": True
+    #
+    # PRESET B — single-LR full encoders, no cross-attn (~5h on P100 batch=16):
+    #   "LR_GRID": [2e-5], "TOP_K_FUSION_FOR_CROSSATTN": 0
+    #
+    # PRESET C — full grid, batch=16 (~12h, needs 2 Kaggle sessions or P100+):
+    #   (default above)
 }
 
 NUM_LABELS: int = len(CONFIG["LABELS"])
