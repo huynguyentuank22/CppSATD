@@ -94,9 +94,10 @@ CONFIG: Dict[str, Any] = {
     "WEIGHT_DECAY": 0.01,
     "ES_PATIENCE": 2,
     "MAX_GRAD_NORM": 1.0,
-    # P100 supports FP16 but lacks Turing Tensor Cores → AMP gives only ~1.3× speedup.
-    # Still worth enabling for memory savings (allows larger batch).
-    "USE_AMP": torch.cuda.is_available(),
+    # P100 does NOT have Turing/Ampere Tensor Cores → AMP FP16 gives minimal speedup.
+    # More importantly, DeBERTa-v3 stores some layers in FP16 internally, which causes
+    # "Attempting to unscale FP16 gradients" crash with GradScaler. Keep USE_AMP=False.
+    "USE_AMP": False,
     "DEVICE": "cuda" if torch.cuda.is_available() else "cpu",
 
     # ── LR grid ──────────────────────────────────────────────────────────────
