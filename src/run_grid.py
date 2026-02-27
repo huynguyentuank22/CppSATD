@@ -56,7 +56,7 @@ CONFIG: Dict[str, Any] = {
     # ── Paths ───────────────────────────────────────────────────────────────
     # Point DATA_PATH to the cleaned CSV (absolute or relative).
     # On Kaggle set to e.g. "/kaggle/input/cppsatd/manual_annotations_cleaned.csv"
-    "DATA_PATH": "/kaggle/input/cppsatd/manual_annotations_cleaned.csv",
+    "DATA_PATH": "/kaggle/input/datasets/huy281204/cppsatd/manual_annotations_cleaned.csv",
     "OUTPUT_DIR": "/kaggle/working/satd_xai_outputs",
 
     # ── Dataset / Schema ────────────────────────────────────────────────────
