@@ -107,9 +107,9 @@ CONFIG: Dict[str, Any] = {
 
     # ── Models ───────────────────────────────────────────────────────────────
     "COMMENT_ENCODERS": [
-        "roberta-base",
+        # "roberta-base",
         "microsoft/deberta-base",
-        "bert-base-uncased",
+        # "bert-base-uncased",
     ],
     "CODE_ENCODERS": [
         "microsoft/codebert-base",
