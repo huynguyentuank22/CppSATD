@@ -34,8 +34,8 @@ import pandas as pd
 # Paths (relative to this file)
 # ---------------------------------------------------------------------------
 _HERE = Path(__file__).parent
-DEFAULT_LOG = _HERE.parent / "results" / "phase3.txt"
-DEFAULT_OUT = _HERE.parent / "results" / "phase3"
+DEFAULT_LOG = _HERE.parent / "results" / "download.txt"
+DEFAULT_OUT = _HERE.parent / "results" / "download_log"
 
 # ---------------------------------------------------------------------------
 # Regexes
