@@ -112,9 +112,9 @@ CONFIG: Dict[str, Any] = {
         # "bert-base-uncased",
     ],
     "CODE_ENCODERS": [
-        "microsoft/codebert-base",
-        "microsoft/graphcodebert-base",
-        # "microsoft/unixcoder-base-nine",
+        # "microsoft/codebert-base",
+        # "microsoft/graphcodebert-base",
+        "microsoft/unixcoder-base-nine",
     ],
 
     # ── Grid control ─────────────────────────────────────────────────────────
