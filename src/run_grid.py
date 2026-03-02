@@ -107,18 +107,18 @@ CONFIG: Dict[str, Any] = {
 
     # ── Models ───────────────────────────────────────────────────────────────
     "COMMENT_ENCODERS": [
-        # "roberta-base",
+        "roberta-base",
         "microsoft/deberta-base",
-        # "bert-base-uncased",
+        "bert-base-uncased",
     ],
     "CODE_ENCODERS": [
-        # "microsoft/codebert-base",
-        # "microsoft/graphcodebert-base",
+        "microsoft/codebert-base",
+        "microsoft/graphcodebert-base",
         "microsoft/unixcoder-base-nine",
     ],
 
     # ── Grid control ─────────────────────────────────────────────────────────
-    "TOP_K_FUSION_FOR_CROSSATTN": 3,    # how many late-fusion combos to promote to cross-attn
+    "TOP_K_FUSION_FOR_CROSSATTN": 1,    # how many late-fusion combos to promote to cross-attn
     "CROSS_ATTN_HEADS": 8,
     "CROSS_ATTN_PROJ_DIM": 768,
 
@@ -143,7 +143,7 @@ CONFIG: Dict[str, Any] = {
     #
     # Example (Kaggle):
     #   "/kaggle/input/satd-phase3-outputs/results_phase3.json"
-    "PHASE3_RESULT_PATH": None,
+    "PHASE3_RESULT_PATH": "/kaggle/input/datasets/huy281204/cppsatd/results_phase3_final.json",
 
     # ── Debug ────────────────────────────────────────────────────────────────
     # Set > 0 to subsample dataset for a quick smoke-test run;
