@@ -783,8 +783,24 @@ def main() -> None:
             "          Phase 4 requires results_phase3.json to exist first."
         ),
     )
+    ap.add_argument(
+        "--phase3-result-path",
+        type=str,
+        default=None,
+        dest="phase3_result_path",
+        help=(
+            "Path to results_phase3.json used by Phase 4 to select top-K combos.\n"
+            "Overrides CONFIG['PHASE3_RESULT_PATH'] when provided.\n"
+            "Example: --phase3-result-path /kaggle/input/satd/results_phase3_final.json"
+        ),
+    )
     args, _unknown = ap.parse_known_args()  # _unknown ignores Jupyter/papermill extras
     phase = args.phase
+
+    # CLI override takes priority over CONFIG value
+    if args.phase3_result_path is not None:
+        CONFIG["PHASE3_RESULT_PATH"] = args.phase3_result_path
+        logger.info("PHASE3_RESULT_PATH overridden via CLI: %s", CONFIG["PHASE3_RESULT_PATH"])
 
     logger.info("=" * 70)
     logger.info("run_grid  PHASE=%d%s", phase, "  (all)" if phase == 0 else "")
