@@ -1,0 +1,144 @@
+{
+  "overall": {
+    "5": {
+      "mean_delta_del": 0.2436790379293489,
+      "mean_p_suf": 0.735771026509589,
+      "mean_delta_suf": 0.24507585995886352,
+      "n_samples": 3905
+    },
+    "10": {
+      "mean_delta_del": 0.30810050989960325,
+      "mean_p_suf": 0.8425735096619105,
+      "mean_delta_suf": 0.13827337680654214,
+      "n_samples": 3905
+    },
+    "20": {
+      "mean_delta_del": 0.34536316727875677,
+      "mean_p_suf": 0.924946447745467,
+      "mean_delta_suf": 0.055900438722985536,
+      "n_samples": 3905
+    }
+  },
+  "per_class": {
+    "Design": {
+      "5": {
+        "mean_delta_del": 0.6334736432588297,
+        "mean_p_suf": 0.3090911422609691,
+        "mean_delta_suf": 0.6595951775205818,
+        "n_samples": 913
+      },
+      "10": {
+        "mean_delta_del": 0.8146816154746501,
+        "mean_p_suf": 0.583745133808695,
+        "mean_delta_suf": 0.38494118597285604,
+        "n_samples": 913
+      },
+      "20": {
+        "mean_delta_del": 0.9076864877671973,
+        "mean_p_suf": 0.8183943295606435,
+        "mean_delta_suf": 0.1502919902209075,
+        "n_samples": 913
+      }
+    },
+    "Requirement": {
+      "5": {
+        "mean_delta_del": 0.6206029132987035,
+        "mean_p_suf": 0.36971112916401894,
+        "mean_delta_suf": 0.6005019470582214,
+        "n_samples": 441
+      },
+      "10": {
+        "mean_delta_del": 0.8071494116370989,
+        "mean_p_suf": 0.6799094012047788,
+        "mean_delta_suf": 0.29030367501746135,
+        "n_samples": 441
+      },
+      "20": {
+        "mean_delta_del": 0.9344875320293821,
+        "mean_p_suf": 0.8661111128637361,
+        "mean_delta_suf": 0.10410196335850413,
+        "n_samples": 441
+      }
+    },
+    "Test": {
+      "5": {
+        "mean_delta_del": 0.8744868352925224,
+        "mean_p_suf": 0.23339189073371358,
+        "mean_delta_suf": 0.7244927537349118,
+        "n_samples": 48
+      },
+      "10": {
+        "mean_delta_del": 0.9466350083436103,
+        "mean_p_suf": 0.6556944154313745,
+        "mean_delta_suf": 0.3021902290372509,
+        "n_samples": 48
+      },
+      "20": {
+        "mean_delta_del": 0.9574498493593543,
+        "mean_p_suf": 0.8370252629583774,
+        "mean_delta_suf": 0.12085938151024796,
+        "n_samples": 48
+      }
+    },
+    "Non-SATD": {
+      "5": {
+        "mean_delta_del": 0.006942969889790181,
+        "mean_p_suf": 0.9825538784086549,
+        "mean_delta_suf": 0.0055850577104869376,
+        "n_samples": 2448
+      },
+      "10": {
+        "mean_delta_del": 0.005308831825983343,
+        "mean_p_suf": 0.9837002458019741,
+        "mean_delta_suf": 0.004438690317167777,
+        "n_samples": 2448
+      },
+      "20": {
+        "mean_delta_del": 0.005499086435893451,
+        "mean_p_suf": 0.9857637858286482,
+        "mean_delta_suf": 0.0023751502904936915,
+        "n_samples": 2448
+      }
+    },
+    "Documentation": {
+      "5": {
+        "mean_delta_del": 0.6160642782682165,
+        "mean_p_suf": 0.498095455087082,
+        "mean_delta_suf": 0.49418160089169305,
+        "n_samples": 6
+      },
+      "10": {
+        "mean_delta_del": 0.6552045299091939,
+        "mean_p_suf": 0.4930084181826828,
+        "mean_delta_suf": 0.4992686377960922,
+        "n_samples": 6
+      },
+      "20": {
+        "mean_delta_del": 0.6585563092576194,
+        "mean_p_suf": 0.4945999617638108,
+        "mean_delta_suf": 0.4976770942149642,
+        "n_samples": 6
+      }
+    },
+    "Defect": {
+      "5": {
+        "mean_delta_del": 0.7520648571471611,
+        "mean_p_suf": 0.17264816008612482,
+        "mean_delta_suf": 0.7872758030713732,
+        "n_samples": 49
+      },
+      "10": {
+        "mean_delta_del": 0.8369297511771204,
+        "mean_p_suf": 0.30450240730774847,
+        "mean_delta_suf": 0.6554215558497497,
+        "n_samples": 49
+      },
+      "20": {
+        "mean_delta_del": 0.9070552866790756,
+        "mean_p_suf": 0.5402509119011836,
+        "mean_delta_suf": 0.4196730512563145,
+        "n_samples": 49
+      }
+    }
+  }
+}

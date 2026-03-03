@@ -1,7 +1,14 @@
 data/*
 !data/.gitkeep
 
-results/
+results/*
+!results/explain/
+results/explain/*
+!results/explain/test_samples/
+results/explain/test_samples/*
+!results/explain/test_samples/*.json
+!results/explain/test_samples/*.jsonl
+!results/explain/test_samples/*.png
 
 src/rq*.py
 
