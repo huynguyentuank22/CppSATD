@@ -54,8 +54,12 @@ except ImportError:
 # ---------------------------------------------------------------------------
 CONFIG: Dict[str, Any] = {
     # Paths
-    "OUTPUT_DIR":    "/kaggle/working/satd_xai_outputs",
-    "BEST_MODEL_DIR": "/kaggle/working/satd_xai_outputs/best_model",
+    "OUTPUT_DIR":      "/kaggle/working/satd_xai_outputs",
+    # ← Thư mục chứa best_model/ (best_config.json + model.pt) từ phase 4
+    #   Đổi <dataset-name> thành tên dataset Kaggle bạn đã upload phase 4 outputs
+    "BEST_MODEL_DIR": "/kaggle/input/datasets/huy281204/cppsatd/best_model",
+    # ← split_info.json từ cùng dataset phase 4 (hoặc dataset riêng)
+    "SPLIT_INFO_INPUT_PATH": "/kaggle/input/datasets/huy281204/cppsatd/split_info_final.json",
     # Original data (CSV or Parquet)
     "DATA_PATH": "/kaggle/input/cppsatd/manual_annotations_cleaned.csv",
 
@@ -775,11 +779,22 @@ def compute_faithfulness_metrics(
 # ===========================================================================
 
 def main() -> None:
+    import shutil
     set_seed(42)
     device = torch.device(CONFIG["DEVICE"])
     output_dir = Path(CONFIG["OUTPUT_DIR"])
     best_dir   = Path(CONFIG["BEST_MODEL_DIR"])
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── 0. Copy split_info.json from input dataset to OUTPUT_DIR ────────────
+    split_dst = output_dir / "split_info.json"
+    split_src = Path(CONFIG["SPLIT_INFO_INPUT_PATH"])
+    if not split_dst.exists():
+        if split_src.exists():
+            shutil.copy(str(split_src), str(split_dst))
+            logger.info("Copied split_info.json from %s", split_src)
+        else:
+            logger.warning("split_info.json not found at %s — test split may differ!", split_src)
 
     # ── 1. Load best config ─────────────────────────────────────────────────
     best_cfg_path = best_dir / "best_config.json"
