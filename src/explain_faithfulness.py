@@ -61,7 +61,7 @@ CONFIG: Dict[str, Any] = {
     # ← split_info.json từ cùng dataset phase 4 (hoặc dataset riêng)
     "SPLIT_INFO_INPUT_PATH": "/kaggle/input/datasets/huy281204/cppsatd/split_info_final.json",
     # Original data (CSV or Parquet)
-    "DATA_PATH": "/kaggle/input/cppsatd/manual_annotations_cleaned.csv",
+    "DATA_PATH": "/kaggle/input/datasets/huy281204/cppsatd/manual_annotations_cleaned.csv",
 
     # XAI subset size (use all test if test is smaller)
     "XAI_SUBSET_SIZE": 500,
