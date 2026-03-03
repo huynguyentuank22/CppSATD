@@ -381,15 +381,17 @@ def _make_forward_fn_comment_only(model: _CommentOnlyModel, attention_mask: torc
                                    token_type_ids: Optional[torch.Tensor] = None):
     """Return a forward function: embedding_output -> logits (for LIG)."""
     def forward_fn(inputs_embeds: torch.Tensor) -> torch.Tensor:
-        # We need to pass embeddings directly to BERT-style encoder
+        # Captum internal_batch_size > 1 passes (B, L, H); expand masks accordingly
+        bsz = inputs_embeds.shape[0]
+        amask = attention_mask.expand(bsz, -1)
         enc_kw: Dict = dict(
             inputs_embeds=inputs_embeds,
-            attention_mask=attention_mask,
+            attention_mask=amask,
         )
         if token_type_ids is not None:
-            enc_kw["token_type_ids"] = token_type_ids
+            enc_kw["token_type_ids"] = token_type_ids.expand(bsz, -1)
         out = model.encoder(**enc_kw)
-        pooled = mean_pool(out.last_hidden_state, attention_mask)
+        pooled = mean_pool(out.last_hidden_state, amask)
         return model.head(pooled)
     return forward_fn
 
@@ -397,11 +399,13 @@ def _make_forward_fn_comment_only(model: _CommentOnlyModel, attention_mask: torc
 def _make_forward_fn_code_only(model: _CodeOnlyModel, attention_mask: torch.Tensor,
                                 token_type_ids: Optional[torch.Tensor] = None):
     def forward_fn(inputs_embeds: torch.Tensor) -> torch.Tensor:
-        enc_kw: Dict = dict(inputs_embeds=inputs_embeds, attention_mask=attention_mask)
+        bsz = inputs_embeds.shape[0]
+        amask = attention_mask.expand(bsz, -1)
+        enc_kw: Dict = dict(inputs_embeds=inputs_embeds, attention_mask=amask)
         if token_type_ids is not None:
-            enc_kw["token_type_ids"] = token_type_ids
+            enc_kw["token_type_ids"] = token_type_ids.expand(bsz, -1)
         out = model.encoder(**enc_kw)
-        pooled = mean_pool(out.last_hidden_state, attention_mask)
+        pooled = mean_pool(out.last_hidden_state, amask)
         return model.head(pooled)
     return forward_fn
 
@@ -492,21 +496,24 @@ def compute_ig_attributions(
 
         def fwd_comment_embs(c_emb: torch.Tensor) -> torch.Tensor:
             """Forward with variable comment embeddings, fixed code."""
-            # Comment encoder with embeddings
-            c_kw: Dict = dict(inputs_embeds=c_emb, attention_mask=comment_attn_mask)
-            if comment_ttids is not None:
-                c_kw["token_type_ids"] = comment_ttids
+            bsz = c_emb.shape[0]
+            c_amask = comment_attn_mask.expand(bsz, -1)
+            k_amask = code_attn_mask.expand(bsz, -1)
 
-            k_kw: Dict = dict(inputs_embeds=k_embeds.detach(), attention_mask=code_attn_mask)
+            c_kw: Dict = dict(inputs_embeds=c_emb, attention_mask=c_amask)
+            if comment_ttids is not None:
+                c_kw["token_type_ids"] = comment_ttids.expand(bsz, -1)
+
+            k_kw: Dict = dict(inputs_embeds=k_embeds.detach().expand(bsz, -1, -1), attention_mask=k_amask)
             if code_ttids is not None:
-                k_kw["token_type_ids"] = code_ttids
+                k_kw["token_type_ids"] = code_ttids.expand(bsz, -1)
 
             c_out = model.c_enc(**c_kw)
             k_out = model.k_enc(**k_kw)
 
             if model_type == "late_fusion":
-                c_rep = mean_pool(c_out.last_hidden_state, comment_attn_mask)
-                k_rep = mean_pool(k_out.last_hidden_state, code_attn_mask)
+                c_rep = mean_pool(c_out.last_hidden_state, c_amask)
+                k_rep = mean_pool(k_out.last_hidden_state, k_amask)
                 if model.c_proj is not None:
                     c_rep = model.c_proj(c_rep)
                 if model.k_proj is not None:
@@ -516,11 +523,11 @@ def compute_ig_attributions(
                 # cross_attn
                 c_h = model.c_proj(c_out.last_hidden_state)
                 k_h = model.k_proj(k_out.last_hidden_state) if not isinstance(model.k_proj, nn.Identity) else k_out.last_hidden_state
-                kpm = (code_attn_mask == 0)
+                kpm = (k_amask == 0)
                 attn_vals, _ = model.cross_attn(c_h, k_h, k_h, key_padding_mask=kpm)
                 c_att = model.norm(c_h + model.drop(attn_vals))
-                c_rep = mean_pool(c_att, comment_attn_mask)
-                k_rep = mean_pool(k_h, code_attn_mask)
+                c_rep = mean_pool(c_att, c_amask)
+                k_rep = mean_pool(k_h, k_amask)
                 return model.head(torch.cat([c_rep, k_rep], dim=-1))
 
         ig_c = IntegratedGradients(fwd_comment_embs)
@@ -536,19 +543,23 @@ def compute_ig_attributions(
 
         # ── code attribution (comment fixed) ──────────────────────────────
         def fwd_code_embs(k_emb: torch.Tensor) -> torch.Tensor:
-            c_kw: Dict = dict(inputs_embeds=c_embeds.detach(), attention_mask=comment_attn_mask)
+            bsz = k_emb.shape[0]
+            c_amask = comment_attn_mask.expand(bsz, -1)
+            k_amask = code_attn_mask.expand(bsz, -1)
+
+            c_kw: Dict = dict(inputs_embeds=c_embeds.detach().expand(bsz, -1, -1), attention_mask=c_amask)
             if comment_ttids is not None:
-                c_kw["token_type_ids"] = comment_ttids
-            k_kw: Dict = dict(inputs_embeds=k_emb, attention_mask=code_attn_mask)
+                c_kw["token_type_ids"] = comment_ttids.expand(bsz, -1)
+            k_kw: Dict = dict(inputs_embeds=k_emb, attention_mask=k_amask)
             if code_ttids is not None:
-                k_kw["token_type_ids"] = code_ttids
+                k_kw["token_type_ids"] = code_ttids.expand(bsz, -1)
 
             c_out = model.c_enc(**c_kw)
             k_out = model.k_enc(**k_kw)
 
             if model_type == "late_fusion":
-                c_rep = mean_pool(c_out.last_hidden_state, comment_attn_mask)
-                k_rep = mean_pool(k_out.last_hidden_state, code_attn_mask)
+                c_rep = mean_pool(c_out.last_hidden_state, c_amask)
+                k_rep = mean_pool(k_out.last_hidden_state, k_amask)
                 if model.c_proj is not None:
                     c_rep = model.c_proj(c_rep)
                 if model.k_proj is not None:
@@ -557,11 +568,11 @@ def compute_ig_attributions(
             else:
                 c_h = model.c_proj(c_out.last_hidden_state)
                 k_h = model.k_proj(k_out.last_hidden_state) if not isinstance(model.k_proj, nn.Identity) else k_out.last_hidden_state
-                kpm = (code_attn_mask == 0)
+                kpm = (k_amask == 0)
                 attn_vals, _ = model.cross_attn(c_h, k_h, k_h, key_padding_mask=kpm)
                 c_att = model.norm(c_h + model.drop(attn_vals))
-                c_rep = mean_pool(c_att, comment_attn_mask)
-                k_rep = mean_pool(k_h, code_attn_mask)
+                c_rep = mean_pool(c_att, c_amask)
+                k_rep = mean_pool(k_h, k_amask)
                 return model.head(torch.cat([c_rep, k_rep], dim=-1))
 
         ig_k = IntegratedGradients(fwd_code_embs)
