@@ -64,7 +64,7 @@ CONFIG: Dict[str, Any] = {
     "DATA_PATH": "/kaggle/input/datasets/huy281204/cppsatd/manual_annotations_cleaned.csv",
 
     # XAI subset size (use all test if test is smaller)
-    "XAI_SUBSET_SIZE": 500,
+    "XAI_SUBSET_SIZE": 3905,
     # Faithfulness k values
     "FAITHFULNESS_K": [5, 10, 20],
     # Top tokens kept for evidence reporting
