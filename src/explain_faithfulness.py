@@ -817,7 +817,13 @@ def main() -> None:
     if not ckpt_path.exists():
         raise FileNotFoundError(f"Checkpoint not found at {ckpt_path}")
     state = torch.load(ckpt_path, map_location="cpu")
-    model.load_state_dict(state)
+    # Remap keys: run_grid.py saves with 'comment_encoder'/'code_encoder',
+    # but explain_faithfulness uses 'c_enc'/'k_enc' internally.
+    remapped = {}
+    for k, v in state.items():
+        nk = k.replace("comment_encoder.", "c_enc.").replace("code_encoder.", "k_enc.")
+        remapped[nk] = v
+    model.load_state_dict(remapped, strict=False)
     model.to(device)
     model.eval()
     logger.info("Model loaded from %s", ckpt_path)
